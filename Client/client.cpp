@@ -12,13 +12,21 @@ using namespace std;
 #define BUFFER_SIZE 1024
 
 #define ERROR(x) cout << "[ERROR] :: " << x << "\n";
+// #define SUCCESS(x) cout << "[SUCCESS] :: " << x << "\n";
 #define MSG(x) cout << "[+] " << x << "\n";
+#define PRINT(x) cout << x << "\n";
 #define DEBUG(x) cout << "[DEBUG] :: " << x << "\n";
 
 /* Variable declaration*/
 string PEER_LISTEN_IP;
 int PEER_LISTEN_PORT;
 string TRACKER_FILE_NAME;
+
+string TRACKER_IP = "127.0.0.1";
+int TRACKER_PORT = 8080;
+int TRACKER_SOCKET;
+
+string myLoginInfo = "";
 
 /*--------------------------------*/
 
@@ -138,71 +146,372 @@ void *listenToOtherPeers(void *arg) {
 	shutdown(server_fd, SHUT_RDWR);
 }
 
+int connectMeToTracker() {
+	int tracker_fd; // File Descriptor
+	int new_socket;
+	struct sockaddr_in address;
+	int opt = 1;
+	int addrlen = sizeof(address);
+	char buffer[BUFFER_SIZE];
+
+	// Creating socket file descriptor
+	if ((new_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+	{
+		ERROR("SOCKET CREATION FAILURE!!!");
+		exit(EXIT_FAILURE);
+	}
+
+	address.sin_family = AF_INET;
+	
+	// Attaching IP Address to socket address
+	if (inet_pton(AF_INET, TRACKER_IP.c_str(), &address.sin_addr) <= 0) {
+		ERROR("INVALID IP ADDRESS!!!");
+		exit(EXIT_FAILURE);
+	}
+
+	address.sin_port = htons(TRACKER_PORT);
+
+	if((tracker_fd = connect(new_socket, (struct sockaddr*)&address, sizeof(address))) < 0) {
+		ERROR("UNABLE TO CONNECT THE TRACKERS!!!");
+		exit(EXIT_FAILURE);
+	}
+
+	int noOfBytesReceived = recv(new_socket, buffer, sizeof(buffer), 0);
+	if (noOfBytesReceived <= 0)
+	{
+		ERROR("UNABLE TO CONNECT THE TRACKERS!!!");
+		exit(EXIT_FAILURE);
+	}
+	MSG(buffer);
+
+	return new_socket;
+}
+
 int main(int argc, char** argv)
 {
-
-	// ERROR(2);
-	// return 0;
-	
 	PEER_LISTEN_IP = argv[1];
 	PEER_LISTEN_PORT = stoi(argv[2]);
 	TRACKER_FILE_NAME = argv[3];
 
-	// cout << PEER_LISTEN_IP << " : " << PEER_LISTEN_PORT << " : " << TRACKER_FILE_NAME << "\n";
+	int TRACKER_SOCKET = connectMeToTracker();
+	// MSG("Connected to Tracker Successfully.");
 
 	pthread_t thread_listen_to_other_peers;
 	pthread_create(&thread_listen_to_other_peers, NULL, &listenToOtherPeers, NULL);
 
 
-
-
-	// while(1) {};
-
-	char buffer[1024] = { 0 };
+	char buffer[BUFFER_SIZE] = {0};
 	
 	while(1) {
-		string IP = "127.0.0.1";
-
-		int PORT ; 
-		// cin >> PORT;
-		string mes;
-		// cout << "Enter the <PORT> <MESSAGE> : ";
-		cin >> PORT >> mes;
-		// cout << "PORT is : " << PORT << " : " << htons(PORT) << "\n";
-		
-		// cout << "\n";
-
-		int sock = socket(AF_INET, SOCK_STREAM, 0);
-		int  valread, client_fd;
-
-		struct sockaddr_in serv_addr;
-		serv_addr.sin_family = AF_INET;
-		serv_addr.sin_port = htons(PORT);
-
-		// Convert IPv4 and IPv6 addresses from text to binary form
-		if (inet_pton(AF_INET, IP.c_str() , &serv_addr.sin_addr)<= 0) {
-			printf(
-				"\nInvalid address/ Address not supported \n");
-			return -1;
-		}
-
-		if ((client_fd
-			= connect(sock, (struct sockaddr*)&serv_addr,
-					sizeof(serv_addr)))
-			< 0) {
-			printf("\nConnection Failed \n");
-			continue;
-			// return -1;
-		}
-		// cout << "$$$\n";
-		// pthread_t ptid;
-		// pthread_create(&ptid, NULL, &readFromServer, (void *)sock);
-		send(sock, mes.c_str(), mes.size(), 0);
 		bzero(buffer, sizeof(buffer));
-		recv(sock, buffer, 1024, 0);
 
-		cout << buffer << "\n";
-		close(sock);
+		string inputString;
+		getline(cin, inputString); // Taking Input from Client.
+		
+		
+		// Tokenising the input string, and storing it in vector.
+		vector<string> inputVector;
+		stringstream ss(inputString);
+    	string token;
+    	while (ss >> token) {
+			inputVector.push_back(token);
+    	}
+
+		int noOfTokensInInputString = inputVector.size();
+
+		// no input - do nothing
+		if(noOfTokensInInputString == 0) {
+			continue;
+		}
+		// create_user
+		else if(inputVector[0] == "create_user") {
+			if(noOfTokensInInputString != 3) {
+				ERROR("2 arguments required.")
+				continue;
+			}
+
+			if(myLoginInfo != "") {
+				ERROR("You are currently logged in.\nPlease logout to create user.");
+				continue;
+			}
+
+			string user_id = inputVector[1];
+			string password = inputVector[2];
+
+			string command = "create_user " +  user_id + " " + password;
+
+			send(TRACKER_SOCKET, command.c_str(), command.size(), 0);
+			
+			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+
+			PRINT(buffer);
+		}
+
+		// login
+		else if(inputVector[0] == "login") {
+			if(noOfTokensInInputString != 3) {
+				ERROR("2 arguments required.")
+				continue;
+			}
+
+			if(myLoginInfo != "") {
+				ERROR("You are currently logged in with user_id : '" + myLoginInfo + "'. Please logout to use another account.");
+				continue;
+			}
+			
+			string user_id = inputVector[1];
+			string password = inputVector[2];
+
+			string command = "login " +  user_id + " " + password + " " + PEER_LISTEN_IP + " " + to_string(PEER_LISTEN_PORT);
+
+			send(TRACKER_SOCKET, command.c_str(), command.size(), 0);
+			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+			string mes = buffer;
+			if(mes == "user_logged_in") {
+				myLoginInfo = user_id;
+				PRINT(mes);
+			}
+			else {
+				PRINT(mes);
+			}
+
+		}
+
+		// create_group
+		else if(inputVector[0] == "create_group") {
+			if(noOfTokensInInputString != 2) {
+				ERROR("1 argument required.")
+				continue;
+			}
+
+			if(myLoginInfo == "") {
+				ERROR("User not logged in. Login first");
+				continue;
+			}
+
+			string group_id = inputVector[1];
+
+			string command = "create_group " + group_id + " " + myLoginInfo;
+
+			send(TRACKER_SOCKET, command.c_str(), command.size(), 0);
+
+			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+
+			string mes = buffer;
+
+			PRINT(mes);
+
+		}
+
+		// join_group
+		else if(inputVector[0] == "join_group") {
+			if(noOfTokensInInputString != 2) {
+				ERROR("1 argument required.")
+				continue;
+			}
+
+			if(myLoginInfo == "") {
+				ERROR("User not logged in. Login first");
+				continue;
+			}
+		
+			string group_id = inputVector[1];
+
+			string command = "join_group " + group_id + " " + myLoginInfo;
+
+			send(TRACKER_SOCKET, command.c_str(), command.size(), 0);
+
+			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+
+			string mes = buffer;
+
+			PRINT(mes);
+
+		}
+
+		// leave_group
+		else if(inputVector[0] == "leave_group") {
+			if(noOfTokensInInputString != 2) {
+				ERROR("1 argument required.")
+				continue;
+			}
+
+			if(myLoginInfo == "") {
+				ERROR("User not logged in. Login first");
+				continue;
+			}
+
+			string group_id = inputVector[1];
+
+			string command = "leave_group " + group_id + " " + myLoginInfo;
+
+			send(TRACKER_SOCKET, command.c_str(), command.size(), 0);
+
+			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+
+			string mes = buffer;
+
+			PRINT(mes);
+
+
+		}
+
+		// list_requests
+		else if(inputVector[0] == "list_requests") {
+			if(noOfTokensInInputString != 2) {
+				ERROR("1 argument required.")
+				continue;
+			}
+
+			if(myLoginInfo == "") {
+				ERROR("User not logged in. Login first");
+				continue;
+			}
+
+			string group_id = inputVector[1];
+
+			string command = "list_requests " + group_id + " " + myLoginInfo;
+
+			send(TRACKER_SOCKET, command.c_str(), command.size(), 0);
+
+			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+
+			string mes = buffer;
+
+			PRINT(mes);
+
+		}
+
+		// accept_request
+		else if(inputVector[0] == "accept_request") {
+			if(noOfTokensInInputString != 3) {
+				ERROR("2 arguments required.")
+				continue;
+			}
+
+			if(myLoginInfo == "") {
+				ERROR("User not logged in. Login first");
+				continue;
+			}
+
+			string group_id = inputVector[1];
+			string pending_member_group_id = inputVector[2];
+
+			string command = "accept_request " + group_id + " " + myLoginInfo + " " + pending_member_group_id;
+
+			send(TRACKER_SOCKET, command.c_str(), command.size(), 0);
+
+			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+
+			string mes = buffer;
+
+			PRINT(mes);
+		}
+
+		// list_groups
+		else if(inputVector[0] == "list_groups") {
+			if(myLoginInfo == "") {
+				ERROR("User not logged in. Login first");
+				continue;
+			}
+		}
+
+		// list_files
+		else if(inputVector[0] == "list_files") {
+			if(noOfTokensInInputString != 2) {
+				ERROR("1 argument required.")
+				continue;
+			}
+
+			if(myLoginInfo == "") {
+				ERROR("User not logged in. Login first");
+				continue;
+			}
+		}
+
+		// upload_file
+		else if(inputVector[0] == "upload_file") {
+			if(noOfTokensInInputString != 3) {
+				ERROR("2 arguments required.")
+				continue;
+			}
+
+			if(myLoginInfo == "") {
+				ERROR("User not logged in. Login first");
+				continue;
+			}
+		}
+
+		// download_file
+		else if(inputVector[0] == "download_file") {
+			if(noOfTokensInInputString != 4) {
+				ERROR("3 arguments required.")
+				continue;
+			}
+		}
+
+		// logout
+		else if(inputVector[0] == "logout") {
+			
+		}
+
+		// show_downloads
+		else if(inputVector[0] == "show_downloads") {
+			
+		}
+
+		// stop_share
+		else if(inputVector[0] == "stop_share") {
+			if(noOfTokensInInputString != 3) {
+				ERROR("2 arguments required.")
+				continue;
+			}
+		}
+
+		else {
+			PRINT("Invalid Input.");
+		}
+
+
+
+		/*--------------------------------------------------------------------*/
+
+		// cout << s << "\n";
+
+
+		// string IP = "127.0.0.1";
+
+		// int PORT ; 
+		// string mes;
+		// cin >> PORT >> mes;
+		
+		// int sock = socket(AF_INET, SOCK_STREAM, 0);
+		// int  valread, client_fd;
+
+		// struct sockaddr_in serv_addr;
+		// serv_addr.sin_family = AF_INET;
+		// serv_addr.sin_port = htons(PORT);
+
+		// // Convert IPv4 and IPv6 addresses from text to binary form
+		// if (inet_pton(AF_INET, IP.c_str() , &serv_addr.sin_addr)<= 0) {
+		// 	printf(
+		// 		"\nInvalid address/ Address not supported \n");
+		// 	return -1;
+		// }
+
+		// if ((client_fd
+		// 	= connect(sock, (struct sockaddr*)&serv_addr,
+		// 			sizeof(serv_addr)))
+		// 	< 0) {
+		// 	printf("\nConnection Failed \n");
+		// 	continue;
+		// }
+		// send(sock, mes.c_str(), mes.size(), 0);
+		// bzero(buffer, sizeof(buffer));
+		// recv(sock, buffer, 1024, 0);
+
+		// cout << buffer << "\n";
+		// close(sock);
 
 	}
 
