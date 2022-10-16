@@ -4,18 +4,30 @@
 #include <bits/stdc++.h>
 #include <pthread.h>
 #include <dirent.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <openssl/sha.h>
 
 using namespace std;
 
 /*Define Macros*/
 #define LSITEN_QUEUE_LENGTH 10
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 524288
 
 #define ERROR(x) cout << "[ERROR] :: " << x << "\n";
 // #define SUCCESS(x) cout << "[SUCCESS] :: " << x << "\n";
 #define MSG(x) cout << "[+] " << x << "\n";
 #define PRINT(x) cout << x << "\n";
 #define DEBUG(x) cout << "[DEBUG] :: " << x << "\n";
+
+struct fileMetaDataAtClient {
+	string filename;
+	string fileFullPath;
+	string fileSHA;
+	int no_of_chunks_in_file;
+	vector<bool> chunks_bitmap;
+	int no_of_downloaded_chunks;
+};
 
 /* Variable declaration*/
 string PEER_LISTEN_IP;
@@ -27,6 +39,7 @@ int TRACKER_PORT = 8080;
 int TRACKER_SOCKET;
 
 string myLoginInfo = "";
+map<string, fileMetaDataAtClient> mySharableFilesInfo; // filename, metadata
 
 /*--------------------------------*/
 
@@ -45,6 +58,28 @@ bool searchFile(string filename) {
     closedir(dr);
 	return false;
 }
+
+// Calcultae SHA of a file.
+void calculateSHAOfFile(string filepath, string &sha, int &noOfChunks) {
+    int nread;
+    char temp_sha[SHA_DIGEST_LENGTH];
+    SHA_CTX ctx;
+    SHA1_Init(&ctx);
+    int fp = open(filepath.c_str(), O_RDONLY);
+    char buffer[BUFFER_SIZE] = {0};
+    while((nread = read(fp, buffer, sizeof(buffer))) > 0) {
+        SHA1_Update(&ctx, buffer, nread);
+        noOfChunks++;
+        bzero(buffer, sizeof(buffer));
+    }
+    SHA1_Final((unsigned char *)temp_sha, &ctx);
+    if(noOfChunks == 0) sha = "";
+    else {
+        sha = temp_sha;
+        replace(sha.begin(), sha.end(), '\n', '_');
+    }
+}
+
 
 void *processOtherPeersRequest(void *arg)
 {
@@ -414,6 +449,16 @@ int main(int argc, char** argv)
 				ERROR("User not logged in. Login first");
 				continue;
 			}
+
+			string command = "list_groups";
+
+			send(TRACKER_SOCKET, command.c_str(), command.size(), 0);
+
+			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+
+			string mes = buffer;
+
+			PRINT(mes);
 		}
 
 		// list_files
@@ -427,6 +472,17 @@ int main(int argc, char** argv)
 				ERROR("User not logged in. Login first");
 				continue;
 			}
+
+			string group_id = inputVector[1];
+
+			string command = "list_files " + group_id + " " + myLoginInfo;
+
+			send(TRACKER_SOCKET, command.c_str(), command.size(), 0);
+
+			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+
+			string mes = buffer;
+			PRINT(mes);
 		}
 
 		// upload_file
@@ -440,6 +496,49 @@ int main(int argc, char** argv)
 				ERROR("User not logged in. Login first");
 				continue;
 			}
+
+			string fpath = inputVector[1];
+			string group_id = inputVector[2];
+
+			string fsha = "";
+			int total_chunks = 0;
+			calculateSHAOfFile(fpath, fsha, total_chunks);
+
+			if(total_chunks == 0) {
+				ERROR("File doesn't Exists.")
+			}
+			
+			int found = fpath.find_last_of('/');
+			string fname = fpath.substr(found + 1 , fpath.size() - found + 1);
+
+
+			string command = "upload_file " + group_id + " " + myLoginInfo + " " + fsha + " " + fname + " " + to_string(total_chunks);
+
+			send(TRACKER_SOCKET, command.c_str(), command.size(), 0);
+
+			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+
+			string mes = buffer;
+
+			if(mes == "file_uploaded_successfully") {
+				fileMetaDataAtClient f;
+				f.filename = fname;
+				f.fileFullPath = fpath;
+				f.fileSHA = fsha;
+				f.no_of_chunks_in_file = total_chunks;
+				for(int i = 0; i < total_chunks; i++) {
+					f.chunks_bitmap.push_back(1);
+				}
+				f.no_of_downloaded_chunks = total_chunks; 
+
+				mySharableFilesInfo[fname] = f;
+
+				PRINT("File Uploaded Successfully.")
+			}
+
+			else {
+				ERROR(mes)
+			}
 		}
 
 		// download_file
@@ -448,10 +547,22 @@ int main(int argc, char** argv)
 				ERROR("3 arguments required.")
 				continue;
 			}
+
+			if(myLoginInfo == "") {
+				ERROR("User not logged in. Login first");
+				continue;
+			}
+
+
 		}
 
 		// logout
 		else if(inputVector[0] == "logout") {
+
+			if(myLoginInfo == "") {
+				ERROR("Login first, then logout.");
+				continue;
+			}
 			
 		}
 

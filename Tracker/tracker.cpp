@@ -15,6 +15,14 @@ using namespace std;
 #define MSG(x) cout << "[+] " << x << "\n";
 #define DEBUG(x) cout << "[DEBUG] :: " << x << "\n";
 
+struct fileMetaDataAtTracker {
+	string filename;
+	string fileSHA;
+	int no_of_chunks_in_file;
+	set<string> usersHavingChunksOfFile; // user_id's
+};
+
+// 
 /* Variable declaration*/
 string TRACKER_LISTEN_IP;
 int TRACKER_LISTEN_PORT;
@@ -28,7 +36,7 @@ map<string, string> groupInfo; // groupid, userid(owner)-- Owner Info
 map<string, set<string>> groupMemberInfo; // groupid, {userid's} -- infor of group members
 map<string, set<string>> groupPendingRequestInfo; // groupid, {userid's} -- Pending Request.
 
-
+map<string, map<string, fileMetaDataAtTracker>> groupWiseSharableFiles; // group_id, fileName, fileMetaData
 
 /*--------------------------------*/
 
@@ -50,6 +58,7 @@ void *connectToClients(void *arg)
 		
 		// Maybe due to Connection Breaks Between Client & Server
 		if (noOfBytesReceived <= 0) break;
+
 
 		string inputString = buffer;
 		vector<string> inputVector;
@@ -221,7 +230,7 @@ void *connectToClients(void *arg)
 				message = "Group doesn't exists";
 			}
 
-			if(groupInfo[group_id] != user_id) { 
+			else if(groupInfo[group_id] != user_id) { 
 				message = "Only Group Admins can accept the request.";
 			}
 
@@ -238,6 +247,87 @@ void *connectToClients(void *arg)
 			send(new_socket, message.c_str(), message.size(), 0);
 		}
 
+		// list_groups
+		else if(inputVector[0] == "list_groups") {
+
+			if(groupInfo.size() == 0) { // 
+				message = "Currenty No Groups in the Network.";
+			}
+
+			else {
+				message = "Total Groups in the Network"  + to_string(groupInfo.size()) + "\n";
+				message += "Group Name & Owners details are as below :\n";
+				int i = 0; 
+				for(auto group : groupInfo) {
+					message += to_string(i) + ". " + group.first + " \t" + group.second + "\n";
+				}
+			}
+			send(new_socket, message.c_str(), message.size(), 0);
+
+		}
+
+		// list_files
+		else if(inputVector[0] == "list_files") {
+			string group_id = inputVector[1];
+			string user_id = inputVector[2];
+			
+			if(groupInfo.find(group_id) == groupInfo.end()) { // 
+				message = "Group doesn't exists";
+			}
+
+			else if(groupMemberInfo[group_id].count(user_id) == 0) {
+				message = "You are not the part of group.";
+			}
+
+			else if(groupWiseSharableFiles[group_id].size() == 0) {
+				message = "Currently no sharable file in the group.";
+			}
+
+			else {
+				message = "Total sharable files : " + to_string(groupWiseSharableFiles[group_id].size()) + "\n";
+				int i = 0;
+				for(auto file : groupWiseSharableFiles[group_id]) {
+					i++;
+					message += to_string(i) + ". " + file.first + "\n";
+				}
+			}
+			send(new_socket, message.c_str(), message.size(), 0);	
+		}
+
+		// upload_file
+		else if(inputVector[0] == "upload_file") {
+			string group_id = inputVector[1];
+			string user_id = inputVector[2];
+			string fsha = inputVector[3];
+			string fname = inputVector[4];
+			int total_chunks = stoi(inputVector[5]);
+
+			if(groupInfo.find(group_id) == groupInfo.end()) { // 
+				message = "Group doesn't exists";
+			}
+
+			else if(groupMemberInfo[group_id].count(user_id) == 0) {
+				message = "You are not the part of group.";
+			}
+
+			else if(groupWiseSharableFiles[group_id].find(fname) != groupWiseSharableFiles[group_id].end()) {
+				message = "No 2 files in a group can't have same file name. Kindly rename the file.";
+			}
+
+			else {
+				fileMetaDataAtTracker f;
+				f.filename = fname;
+				f.fileSHA = fsha;
+				f.no_of_chunks_in_file = total_chunks;
+				f.usersHavingChunksOfFile.insert(user_id);
+
+				groupWiseSharableFiles[group_id][fname] = f;
+				message = "file_uploaded_successfully";
+			}
+			
+			send(new_socket, message.c_str(), message.size(), 0);
+		}
+
 
 		// Aise hi
 		else {
@@ -247,6 +337,7 @@ void *connectToClients(void *arg)
 		
 	}
 
+	cout << "Connection Breaks\n";
 	close(new_socket);
 	pthread_exit(NULL);
 }
