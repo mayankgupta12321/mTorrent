@@ -259,6 +259,7 @@ void *connectToClients(void *arg)
 				message += "Group Name & Owners details are as below :\n";
 				int i = 0; 
 				for(auto group : groupInfo) {
+					i++;
 					message += to_string(i) + ". " + group.first + " \t" + group.second + "\n";
 				}
 			}
@@ -326,6 +327,59 @@ void *connectToClients(void *arg)
 			}
 			
 			send(new_socket, message.c_str(), message.size(), 0);
+		}
+
+		// get_file_metadata
+		else if(inputVector[0] == "get_file_metadata") {
+			string group_id = inputVector[1];
+			string fname = inputVector[2];
+			string user_id = inputVector[3];
+
+			if(groupInfo.find(group_id) == groupInfo.end()) {
+				message = "Group doesn't exists";
+				send(new_socket, message.c_str(), message.size(), 0);
+			}
+
+			else if(groupMemberInfo[group_id].count(user_id) == 0) {
+				message = "You are not the part of group.";
+				send(new_socket, message.c_str(), message.size(), 0);
+			}
+
+			else if(groupWiseSharableFiles[group_id].find(fname) == groupWiseSharableFiles[group_id].end()) {
+				message = "No file present in the group with given file name.";
+				send(new_socket, message.c_str(), message.size(), 0);
+			}
+
+			else if((groupWiseSharableFiles[group_id][fname].usersHavingChunksOfFile.size() == 0) || (groupWiseSharableFiles[group_id][fname].usersHavingChunksOfFile.size() == 1 && *groupWiseSharableFiles[group_id][fname].usersHavingChunksOfFile.begin() == user_id)) {
+				message = "No users are there to upload the file.";
+				send(new_socket, message.c_str(), message.size(), 0);
+			}
+			
+			else {
+				message = "SUCCESS";
+				send(new_socket, message.c_str(), message.size(), 0);
+				bzero(buffer, sizeof(buffer));
+				recv(new_socket, buffer, sizeof(buffer), 0);
+
+				fileMetaDataAtTracker f;
+				f = groupWiseSharableFiles[group_id][fname];
+				message = f.fileSHA;
+				send(new_socket, message.c_str(), message.size(), 0);
+				recv(new_socket, buffer, sizeof(buffer), 0);
+
+				message = to_string(f.no_of_chunks_in_file);
+				send(new_socket, message.c_str(), message.size(), 0);
+				recv(new_socket, buffer, sizeof(buffer), 0);
+
+				message = "";
+				for(auto user : f.usersHavingChunksOfFile) {
+					if(user != user_id) {
+						message += user + " " + userLoggedIn[user].first + " " + to_string(userLoggedIn[user].second) + " ";
+					}
+				}
+				send(new_socket, message.c_str(), message.size(), 0);
+				groupWiseSharableFiles[group_id][fname].usersHavingChunksOfFile.insert(user_id);
+			}
 		}
 
 
