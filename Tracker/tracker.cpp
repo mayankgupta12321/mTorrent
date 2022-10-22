@@ -94,7 +94,7 @@ void *connectToClients(void *arg)
 			if(userInfo.find(user_id) == userInfo.end()) { // 
 				message = "User doesn't exists";
 			}
-			else if(userLoggedIn.find(user_id) != userLoggedIn.end()) { // already there;
+			else if(userLoggedIn.find(user_id) != userLoggedIn.end()) { // already logged in;
 				message = "User already loggedin with other system at " + userLoggedIn[user_id].first + ":" + to_string(userLoggedIn[user_id].second);
 			}
 			else {
@@ -156,18 +156,29 @@ void *connectToClients(void *arg)
 				message = "Group doesn't exists";
 			}
 
-			else if(groupPendingRequestInfo[group_id].count(user_id)) {
+			else if(groupPendingRequestInfo[group_id].find(user_id) != groupPendingRequestInfo[group_id].end()) {
 				groupPendingRequestInfo[group_id].erase(user_id);
 				message = "Your requested to join the group has been cancelled.";
 			}
 
-			else if(groupMemberInfo[group_id].count(user_id) == 0) {
+			else if(groupMemberInfo[group_id].find(user_id) == groupMemberInfo[group_id].end()) {
 				message = "You are not the part of group.";
 			}
 
-			if(groupInfo[group_id] != user_id) { // You are not the owner
+			else if(groupInfo[group_id] != user_id) { // You are not the owner
 				groupMemberInfo[group_id].erase(user_id);
 				message = "You have left the group successfully.";
+
+				vector<string> removableFiles;
+				for(auto file : groupWiseSharableFiles[group_id]) {
+					groupWiseSharableFiles[group_id][file.first].usersHavingChunksOfFile.erase(user_id);
+					if(groupWiseSharableFiles[group_id][file.first].usersHavingChunksOfFile.size() == 0) {
+						removableFiles.push_back(file.first);
+					}
+				}
+				for(auto filename : removableFiles) {
+					groupWiseSharableFiles[group_id].erase(filename);
+				}
 			}
 
 			else if(groupMemberInfo[group_id].size() == 1) { 
@@ -176,6 +187,17 @@ void *connectToClients(void *arg)
 				groupMemberInfo.erase(group_id);
 				groupPendingRequestInfo.erase(group_id);
 				message = "You left the group, and Group Deleted as you were the last member of group.";
+
+				vector<string> removableFiles;
+				for(auto file : groupWiseSharableFiles[group_id]) {
+					groupWiseSharableFiles[group_id][file.first].usersHavingChunksOfFile.erase(user_id);
+					if(groupWiseSharableFiles[group_id][file.first].usersHavingChunksOfFile.size() == 0) {
+						removableFiles.push_back(file.first);
+					}
+				}
+				for(auto filename : removableFiles) {
+					groupWiseSharableFiles[group_id].erase(filename);
+				}
 			}
 
 			else { // Need to transfer the ownership.
@@ -187,8 +209,18 @@ void *connectToClients(void *arg)
 						break;
 					}
 				}
-			}
 
+				vector<string> removableFiles;
+				for(auto file : groupWiseSharableFiles[group_id]) {
+					groupWiseSharableFiles[group_id][file.first].usersHavingChunksOfFile.erase(user_id);
+					if(groupWiseSharableFiles[group_id][file.first].usersHavingChunksOfFile.size() == 0) {
+						removableFiles.push_back(file.first);
+					}
+				}
+				for(auto filename : removableFiles) {
+					groupWiseSharableFiles[group_id].erase(filename);
+				}
+			}
 			send(new_socket, message.c_str(), message.size(), 0);
 		}
 
@@ -358,13 +390,30 @@ void *connectToClients(void *arg)
 			}
 			
 			else {
+				fileMetaDataAtTracker f;
+				f = groupWiseSharableFiles[group_id][fname];
+
+				message = "";
+				int user_count = 0;
+				for(auto user : f.usersHavingChunksOfFile) {
+					if(user != user_id && userLoggedIn.find(user) != userLoggedIn.end()) {
+						message += user + " " + userLoggedIn[user].first + " " + to_string(userLoggedIn[user].second) + " ";
+						user_count++;
+					}
+				}
+
+				if(user_count == 0) {
+					message = "No users are there to upload the file.";
+					send(new_socket, message.c_str(), message.size(), 0);
+					continue;
+				}
+
 				message = "SUCCESS";
 				send(new_socket, message.c_str(), message.size(), 0);
 				bzero(buffer, sizeof(buffer));
 				recv(new_socket, buffer, sizeof(buffer), 0);
 
-				fileMetaDataAtTracker f;
-				f = groupWiseSharableFiles[group_id][fname];
+				
 				message = f.fileSHA;
 				send(new_socket, message.c_str(), message.size(), 0);
 				recv(new_socket, buffer, sizeof(buffer), 0);
@@ -375,12 +424,13 @@ void *connectToClients(void *arg)
 
 				message = "";
 				for(auto user : f.usersHavingChunksOfFile) {
-					if(user != user_id) {
+					if(user != user_id && userLoggedIn.find(user) != userLoggedIn.end()) {
 						message += user + " " + userLoggedIn[user].first + " " + to_string(userLoggedIn[user].second) + " ";
 					}
 				}
 				send(new_socket, message.c_str(), message.size(), 0);
-				groupWiseSharableFiles[group_id][fname].usersHavingChunksOfFile.insert(user_id);
+				groupWiseSharableFiles[group_id][fname].usersHavingChunksOfFile.insert(user_id);	
+				
 			}
 		}
 
@@ -430,8 +480,12 @@ void *connectToClients(void *arg)
 		}
 		
 	}
+	if(loginInfo != "") {
+		message = loginInfo + " disconnected.";
+		DEBUG(message)
+	}
+	
 	userLoggedIn.erase(loginInfo);
-	cout << loginInfo << " ";
 	loginInfo = "";
 	close(new_socket);
 	pthread_exit(NULL);
