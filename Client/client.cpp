@@ -1,23 +1,21 @@
+// Mayank Gupta - 2022201012 - OS3 - mTorrent - @IIIT Hyderabad
+// client.cpp
+
 // Pre Processors
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <bits/stdc++.h>
+#include <arpa/inet.h>
 #include <pthread.h>
-#include <dirent.h>
 #include <fcntl.h>
-#include <sys/stat.h>
 #include <openssl/sha.h>
-#include <cstdlib>
 
 using namespace std;
 
 /*Define Macros*/
-#define LSITEN_QUEUE_LENGTH 10
+#define LSITEN_QUEUE_LENGTH 100
 #define BUFFER_SIZE 524288
 #define CHOTA_CHUNK_SIZE 16384
 
 #define ERROR(x) cout << "[ERROR] :: " << x << "\n";
-// #define SUCCESS(x) cout << "[SUCCESS] :: " << x << "\n";
 #define MSG(x) cout << "[+] " << x << "\n";
 #define PRINT(x) cout << x << "\n";
 #define DEBUG(x) cout << "[DEBUG] :: " << x << "\n";
@@ -36,8 +34,8 @@ struct fileMetaDataAtClient {
 /* Variable declaration*/
 string PEER_LISTEN_IP;
 int PEER_LISTEN_PORT;
-string TRACKER_FILE_NAME;
 
+string TRACKER_FILE_NAME;
 string TRACKER_IP;
 int TRACKER_PORT;
 int TRACKER_SOCKET;
@@ -46,22 +44,6 @@ string myLoginInfo = "";
 map<string, fileMetaDataAtClient> mySharableFilesInfo; // filename, metadata
 
 /*--------------------------------*/
-
-
-bool searchFile(string filename) {
-	struct dirent *de;
-	string path = "./";
-    DIR *dr = opendir(path.c_str());
-    if (dr != NULL) {
-        while ((de = readdir(dr)) != NULL) {
-        	if(de->d_name == filename) {
-        	    return true;
-        	}
-        }
-    }
-    closedir(dr);
-	return false;
-}
 
 // Calcultae SHA of a file.
 void calculateSHAOfFile(string filepath, string &sha, int &noOfChunks) {
@@ -90,7 +72,7 @@ void calculateSHAOfFile(string filepath, string &sha, int &noOfChunks) {
     }
 }
 
-
+// To send chunk & chunk metadata
 void *processOtherPeersRequest(void *arg)
 {
 	int new_socket = long(arg);
@@ -188,6 +170,7 @@ void *processOtherPeersRequest(void *arg)
 	pthread_exit(NULL);
 }
 
+// Continusously listening to other clients, and handling their requests.
 void *listenToOtherPeers(void *arg) {
 	
 	int server_fd; // File Descriptor
@@ -239,12 +222,14 @@ void *listenToOtherPeers(void *arg) {
 
 	while (1)
 	{
+		// Accepting other client connection.
 		if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0)
 		{
 			ERROR("NOT ABLE TO ACCEPT REQUEST");
 			exit(EXIT_FAILURE);
 		}
 
+		// Creating individual thread to handle each request.
 		pthread_t thread_to_process_other_peers_request;
 		pthread_create(&thread_to_process_other_peers_request, NULL, &processOtherPeersRequest, (void *)new_socket);
 	}
@@ -262,6 +247,13 @@ struct downloadFileMetadataArgs {
 	map<string, pair<string,int>> userList; // user_id, IP, Port
 };
 
+/* ImplementingComparator Piece Selection Algorithm - Rarest Piece First */
+bool comparatorForPieceSelection(pair<int, vector<string>> chunk1, pair<int, vector<string>> chunk2)
+{
+    return (chunk1.second.size() < chunk1.second.size());
+}
+
+// Handling the downloading of a file using thread, so multiple files can be downloaded simultaneously.
 void *handleFileDownload(void *arg) {
 
 	char buffer[BUFFER_SIZE];
@@ -278,6 +270,7 @@ void *handleFileDownload(void *arg) {
 		chunksInfo.push_back({i, {}});
 	}
 
+	// Asking each client, those have that file, or some part of file, that which which chuks do  you have.
 	for(auto user : userList) {
 		string IP = user.second.first;
 		int PORT = user.second.second;
@@ -347,14 +340,21 @@ void *handleFileDownload(void *arg) {
 
 	int fwp = open(filePath.c_str(), O_WRONLY | O_CREAT | O_LARGEFILE, S_IRUSR | S_IWUSR);
 
+	/* Implementing Piece Selection Algorithm - Rarest Piece First */
+	sort(chunksInfo.begin(), chunksInfo.end(), comparatorForPieceSelection);
+
+	// Traversing for each chunk as per piece selection algorithm & and downloading that chunk.
 	for(auto chunk : chunksInfo) {
-		int whichChunk = chunk.first;
+		int whichChunk = chunk.first;  // chunk_no to download
+
 		while(chunk.second.size() != 0  && mySharableFilesInfo[filename].chunks_bitmap[whichChunk] == 0) {
+			// picking a random user, who has that chunk, and trying to donwload from them,
+			// If successful then Okay, else will try next user(till we check with all the users).
+
 			int index = rand() % chunk.second.size();
 			string user_id =  chunk.second[index];
 			string IP = userList[user_id].first;
 			int PORT = userList[user_id].second;
-			
 
 			int new_socket, client_fd;
 			struct sockaddr_in address;
@@ -378,6 +378,7 @@ void *handleFileDownload(void *arg) {
 
 			address.sin_port = htons(PORT);
 
+			// Connecting with another client to download the file.
 			if((client_fd = connect(new_socket, (struct sockaddr*)&address, sizeof(address))) < 0) {
 				chunk.second.erase (chunk.second.begin() +  index);
 				continue;
@@ -397,6 +398,10 @@ void *handleFileDownload(void *arg) {
 			command = "1";
 			send(new_socket, command.c_str(), command.size(), 0);
 
+			
+			// As we are not able to receive whole chunk of 512KB at once, 
+			// so we are downloading it in smaller chunks of 16 KB each.
+			//  Also once we receive a single chunk, then we are sending acknowlegment also...
 			int chota_chunk_no = 0;
 			while(sz > 0) {
 				bzero(buffer, sizeof(buffer));
@@ -425,7 +430,8 @@ void *handleFileDownload(void *arg) {
 		}
 	}
 	close(fwp);
-	
+
+	// If whole file downloads, and SHA validates, mark the file as downloaded, else will mark it as failed.
 	if(mySharableFilesInfo[filename].no_of_downloaded_chunks == mySharableFilesInfo[filename].no_of_chunks_in_file) {
 		string fsha = "";
 		int total_chunks = 0;
@@ -448,6 +454,7 @@ void *handleFileDownload(void *arg) {
 
 }
 
+// To fetch Tracker IP, Port details from tracker_info.txt file.
 void fetchTrackerIpPort(int tracker_no) {
 	char buffer[100] = {0};
 	FILE *fd = fopen(TRACKER_FILE_NAME.c_str(), "r");
@@ -475,6 +482,7 @@ void fetchTrackerIpPort(int tracker_no) {
 	exit(EXIT_FAILURE);
 }
 
+// Connecting to Tracker.
 int connectMeToTracker(int tracker_no) {
 	fetchTrackerIpPort(tracker_no);
 	int tracker_fd; // File Descriptor

@@ -1,15 +1,16 @@
+// Mayank Gupta - 2022201012 - OS3 - mTorrent - @IIIT Hyderabad
+// tracker.cpp
+
 // Pre Processors
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <bits/stdc++.h>
+#include <arpa/inet.h>
 #include <pthread.h>
-#include <dirent.h>
 
 using namespace std;
 
 /*Define Macros*/
-#define LSITEN_QUEUE_LENGTH 10
-#define BUFFER_SIZE 1024
+#define LSITEN_QUEUE_LENGTH 100
+#define BUFFER_SIZE 524288
 
 #define ERROR(x) cout << "[ERROR] :: " << x << "\n";
 #define MSG(x) cout << "[+] " << x << "\n";
@@ -38,8 +39,8 @@ map<string, set<string>> groupPendingRequestInfo; // groupid, {userid's} -- Pend
 
 map<string, map<string, fileMetaDataAtTracker>> groupWiseSharableFiles; // group_id, fileName, fileMetaData
 
-/*--------------------------------*/
 
+/* Handling each client individually. */
 
 void *connectToClients(void *arg)
 {
@@ -480,6 +481,8 @@ void *connectToClients(void *arg)
 		}
 		
 	}
+
+	// If client goes down, making him logout at Tracker end.
 	if(loginInfo != "") {
 		message = loginInfo + " disconnected.";
 		DEBUG(message)
@@ -549,6 +552,7 @@ void *listenToClients(void *arg) {
 
 		DEBUG((string)inet_ntoa(address.sin_addr) + " - " + to_string(address.sin_port) + " - " + to_string(ntohs(address.sin_port)));
 
+		// Creating thread for each client to handle each client individually.
 		pthread_t thread_to_connect_to_clients;
 		pthread_create(&thread_to_connect_to_clients, NULL, &connectToClients, (void *)new_socket);
 	}
@@ -557,6 +561,8 @@ void *listenToClients(void *arg) {
 	shutdown(server_fd, SHUT_RDWR);
 }
 
+
+// To fetch Tracker IP, Port details from tracker_info.txt file.
 void fetchTrackerIpPort() {
 	char buffer[100] = {0};
 	FILE *fd = fopen(TRACKER_FILE_NAME.c_str(), "r");
@@ -607,8 +613,15 @@ int main(int argc, char** argv)
 	pthread_t thread_listen_to_clients;
 	pthread_create(&thread_listen_to_clients, NULL, &listenToClients, NULL);
 
+	string input;
 	while(1) {
 		// Will use it for tracker synchronization.
+		cin >> input;
+
+		// Closing the Tracker
+		if(input == "quit" || input == "QUIT") {
+			exit(EXIT_SUCCESS);
+		}
 	}
 
 	return 0;
