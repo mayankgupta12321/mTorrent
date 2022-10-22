@@ -79,8 +79,14 @@ void calculateSHAOfFile(string filepath, string &sha, int &noOfChunks) {
     SHA1_Final((unsigned char *)temp_sha, &ctx);
     if(noOfChunks == 0) sha = "";
     else {
-        sha = temp_sha;
-        replace(sha.begin(), sha.end(), '\n', '_');
+		for(int i = 0 ; i < 20; i++) {
+			if(temp_sha[i] != '\0' && temp_sha[i] != '\n' && temp_sha[i] != '\t') {
+				sha += temp_sha[i];
+			}
+			else{
+				sha += "_";
+			}
+		}
     }
 }
 
@@ -279,14 +285,11 @@ void *handleFileDownload(void *arg) {
 		struct sockaddr_in address;
 		int opt = 1;
 		int addrlen = sizeof(address);
-		
-
-		PRINT(IP + " " + to_string(PORT))
 
 		// Creating socket file descriptor
 		if ((new_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 		{
-			ERROR("#1 error")
+			// ERROR("#1 error")
 			continue;
 		}
 
@@ -294,14 +297,14 @@ void *handleFileDownload(void *arg) {
 
 		// Attaching IP Address to socket address
 		if (inet_pton(AF_INET, IP.c_str(), &address.sin_addr) <= 0) {
-			ERROR("#2 error")
+			// ERROR("#2 error")
 			continue;
 		}
 
 		address.sin_port = htons(PORT);
 
 		if((client_fd = connect(new_socket, (struct sockaddr*)&address, sizeof(address))) < 0) {
-			ERROR("#3 error")
+			// ERROR("#3 error")
 			continue;
 		}
 		string command = "send_file_chunks_metadata " + filename + " " +  user.first;
@@ -313,11 +316,12 @@ void *handleFileDownload(void *arg) {
 		{
 			continue;
 		}
+		string s = buffer;
 		if(buffer == "ERROR") {
 			continue;
 		}
 		
-		string s = buffer;
+		
 		for(int i = 0 ; i < s.size(); i++) {
 			if(s[i] == '1') {
 				chunksInfo[i].second.push_back(user.first);
@@ -384,13 +388,12 @@ void *handleFileDownload(void *arg) {
 			bzero(buffer, sizeof(buffer));
 			
 			int nread = recv(new_socket, buffer, sizeof(buffer), 0);
-			if(nread <= 0 || buffer == "ERROR") {
+			string s = buffer;
+			if(nread <= 0 || s == "ERROR") {
 				chunk.second.erase (chunk.second.begin() +  index);
 				continue;
 			}
-			
-
-			int sz = stoi(buffer);
+			int sz = stoi(s);
 			command = "1";
 			send(new_socket, command.c_str(), command.size(), 0);
 
@@ -398,7 +401,8 @@ void *handleFileDownload(void *arg) {
 			while(sz > 0) {
 				bzero(buffer, sizeof(buffer));
 				nread = recv(new_socket, buffer, CHOTA_CHUNK_SIZE, 0);
-				if (nread <= 0) {
+				s = buffer;
+				if (nread <= 0 || s == "ERROR") {
 					break;
 				}
 				nread = pwrite64(fwp, buffer,nread, whichChunk * BUFFER_SIZE + chota_chunk_no * CHOTA_CHUNK_SIZE);
@@ -416,12 +420,25 @@ void *handleFileDownload(void *arg) {
 			}
 			mySharableFilesInfo[filename].chunks_bitmap[whichChunk] = 1;
 			mySharableFilesInfo[filename].no_of_downloaded_chunks++;
+			// cout << "Chunk " << whichChunk << " is downloaded from " << IP << ":" << PORT << "\n";
 			break;
 		}
-	} 
+	}
 	close(fwp);
+	
 	if(mySharableFilesInfo[filename].no_of_downloaded_chunks == mySharableFilesInfo[filename].no_of_chunks_in_file) {
-		mySharableFilesInfo[filename].status = "downloaded";
+		string fsha = "";
+		int total_chunks = 0;
+		calculateSHAOfFile(mySharableFilesInfo[filename].fileFullPath, fsha, total_chunks);
+		// cout << fsha << "\n" << mySharableFilesInfo[filename].fileSHA << "\n";
+		if(fsha == mySharableFilesInfo[filename].fileSHA) {
+			// cout << filename << " sha matched\n";
+			mySharableFilesInfo[filename].status = "downloaded";
+		}
+		else {
+			mySharableFilesInfo[filename].status = "failed";
+			// cout << filename << " sha not matched\n";
+		}
 	}
 	else {
 		mySharableFilesInfo[filename].status = "failed";
@@ -848,7 +865,11 @@ int main(int argc, char** argv)
 
 			string command = "get_file_metadata " + group_id + " " + filename +  " " + myLoginInfo;
 			send(TRACKER_SOCKET, command.c_str(), command.size(), 0);
-			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+			int nread = recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+			if(nread < 0) {
+				ERROR("SOME ERROR")
+				continue;
+			}
 			string mes = buffer;
 			if(mes != "SUCCESS") {
 				ERROR(mes)
@@ -858,18 +879,30 @@ int main(int argc, char** argv)
 			send(TRACKER_SOCKET, "1", command.size(), 0);
 			bzero(buffer, sizeof(buffer));
 
-			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+			nread = recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+			if(nread < 0) {
+				ERROR("SOME ERROR")
+				continue;
+			}
 			string fileSHA = buffer;
 			send(TRACKER_SOCKET, "1", command.size(), 0);
 
 			bzero(buffer, sizeof(buffer));
-			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+			nread = recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+			if(nread < 0) {
+				ERROR("SOME ERROR")
+				continue;
+			}
 			int no_of_chunks_in_file = stoi(buffer);
 
 			send(TRACKER_SOCKET, "1", command.size(), 0);
 
 			bzero(buffer, sizeof(buffer));
-			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+			nread = recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+			if(nread < 0) {
+				ERROR("SOME ERROR")
+				continue;
+			}
 			string users = buffer;
 
 			map<string, pair<string,int>> userList;
@@ -887,6 +920,7 @@ int main(int argc, char** argv)
 			dfma -> userList = userList;
 			dfma -> groupID = group_id;
 
+			PRINT("Downloading started...")
 			pthread_t thread_to_handle_file_download;
 			pthread_create(&thread_to_handle_file_download, NULL, &handleFileDownload, (void *)dfma);
 
@@ -913,6 +947,9 @@ int main(int argc, char** argv)
 
 		// show_downloads
 		else if(inputVector[0] == "show_downloads") {
+			if(mySharableFilesInfo.size() == 0) {
+				cout << "No Downloaded Files\n";
+			}
 			for(auto file : mySharableFilesInfo) {
 				if(file.second.status == "in_progress") {
 					cout << "[D] " << file.second.groupID << " " << file.first << " " << (file.second.no_of_downloaded_chunks * 100)/file.second.no_of_chunks_in_file << "%\n"; 
@@ -921,7 +958,7 @@ int main(int argc, char** argv)
 					cout << "[C] " << file.second.groupID << " " << file.first << " " << (file.second.no_of_downloaded_chunks * 100)/file.second.no_of_chunks_in_file << "%\n";
 				}
 				else if(file.second.status == "failed") {
-					cout << "[F] " << file.second.groupID << " " << file.first << "\n";
+					cout << "[F] " << file.second.groupID << " " << file.first << " " << (file.second.no_of_downloaded_chunks * 100)/file.second.no_of_chunks_in_file << "%\n";
 				}
 			}
 		}
