@@ -26,6 +26,7 @@ struct fileMetaDataAtClient {
 	string filename;
 	string fileFullPath;
 	string fileSHA;
+	string groupID;
 	int no_of_chunks_in_file;
 	vector<bool> chunks_bitmap;
 	int no_of_downloaded_chunks;
@@ -37,8 +38,8 @@ string PEER_LISTEN_IP;
 int PEER_LISTEN_PORT;
 string TRACKER_FILE_NAME;
 
-string TRACKER_IP = "127.0.0.1";
-int TRACKER_PORT = 8080;
+string TRACKER_IP;
+int TRACKER_PORT;
 int TRACKER_SOCKET;
 
 string myLoginInfo = "";
@@ -105,7 +106,6 @@ void *processOtherPeersRequest(void *arg)
     while (ss >> token) {
 		inputVector.push_back(token);
     }
-	cout<<inputVector[0] << "\n";
 
 	if(inputVector[0] == "send_file_chunks_metadata") {
 		string filename = inputVector[1];
@@ -126,28 +126,22 @@ void *processOtherPeersRequest(void *arg)
 	}
 
 	else if(inputVector[0] == "send_file_chunks") {
-		cout << "INSIDE\n";
 		string filename = inputVector[1];
 		int whichChunk = stoi(inputVector[2]);
 		string user_id = inputVector[3];
 
-		// cout << filename << " " << whichChunk << " " << user_id << " ";
-		cout << whichChunk << " : ";
 		if(myLoginInfo != user_id || mySharableFilesInfo.find(filename) == mySharableFilesInfo.end()) {
 			message = "ERROR";
-			cout << "ERROR";
 			send(new_socket, message.c_str(), message.size(), 0);
 			close(new_socket);
 			pthread_exit(NULL);
 		}
 
 		string filePath = mySharableFilesInfo[filename].fileFullPath;
-		// cout << filePath << "\n";
 		int fp = open(filePath.c_str(), O_RDONLY | O_LARGEFILE);
 
 		bzero(buffer, sizeof(buffer));
 		int nread = pread64(fp,buffer,sizeof(buffer), whichChunk * BUFFER_SIZE);
-		cout << nread << " -- ";
 		int sz = nread;
 		string xx = to_string(nread);
 		send(new_socket, xx.c_str(), xx.size(), 0);
@@ -165,7 +159,6 @@ void *processOtherPeersRequest(void *arg)
 			
 			bzero(buffer, sizeof(buffer));
 			nread = pread64(fp,buffer, CHOTA_CHUNK_SIZE, whichChunk * BUFFER_SIZE + chota_chunk_no * CHOTA_CHUNK_SIZE);
-			// cout << "CHOTA CHUNK : " << nread << "\n";
 			send(new_socket, buffer, nread, 0);
 			int noOfBytesReceived = recv(new_socket, buffer, sizeof(buffer), 0);
 			if (noOfBytesReceived <= 0) {
@@ -175,34 +168,15 @@ void *processOtherPeersRequest(void *arg)
 			sz = sz - nread;
 		}
 
-		cout << sz << "\n";
-		// nread = send(new_socket, sz, sz.size(), 0);
-		
-		// cout << nread << "\n";
 		close(fp);
 		close(new_socket);
 		pthread_exit(NULL);
 	}
+	else {
+		message = "ERROR";
+		send(new_socket, message.c_str(), message.size(), 0);
+	}
 	
-
-
-
-	/* PROCESS OTHER PEER REQUEST */
-	// string filename = buffer;
-	// string message = to_string(PEER_LISTEN_PORT);
-
-	// if(searchFile(filename)) {
-	// 	message += " : " + filename + " : File Found";
-	// }
-	// else {
-	// 	message += " : " + filename + " : File Not Found";
-	// }
-
-	// send(new_socket, message.c_str(), message.size(), 0);
-
-	/*--------------------------------------*/
-
-	// cout << "Peer Requested processed successfully.\n";
 
 	close(new_socket);
 	pthread_exit(NULL);
@@ -277,27 +251,21 @@ struct downloadFileMetadataArgs {
     string filename;
 	string fileDestinationPath;
 	string fileSHA;
+	string groupID;
 	int no_of_chunks_in_file;
 	map<string, pair<string,int>> userList; // user_id, IP, Port
 };
 
 void *handleFileDownload(void *arg) {
 
-	cout << "------------------------------\n";
 	char buffer[BUFFER_SIZE];
-	// string group_id = ((downloadFileArgs*)arg) -> group_id;
 	string filename = ((downloadFileMetadataArgs*)arg) -> filename;
 	string fileDestinationPath = ((downloadFileMetadataArgs*)arg) -> fileDestinationPath;
 	if(fileDestinationPath[fileDestinationPath.size() - 1] != '/') fileDestinationPath += '/';
 	string fileSHA = ((downloadFileMetadataArgs*)arg) -> fileSHA;
 	int no_of_chunks_in_file = ((downloadFileMetadataArgs*)arg) -> no_of_chunks_in_file;
-	// vector<pair(string, pair)> userList = ((downloadFileMetadataArgs*)arg) -> userList; 
 	map<string, pair<string,int>> userList = ((downloadFileMetadataArgs*)arg) -> userList; // userid, IP, PORT
-	cout << filename << " " << fileDestinationPath << " " << fileSHA << " " << no_of_chunks_in_file << "\n";
-	cout << userList.size() << "\n";
-	// for(auto user : userList) {
-	// 	cout << user.first << " " << user.second.first << " " << user.second.second << "\n";
-	// }
+	string groupID = ((downloadFileMetadataArgs*)arg) -> groupID;
 	//--------------------------------------------
 	vector<pair<int, vector<string>>> chunksInfo; 
 	for(int i = 0 ; i < no_of_chunks_in_file; i++) {
@@ -305,7 +273,6 @@ void *handleFileDownload(void *arg) {
 	}
 
 	for(auto user : userList) {
-		cout << user.first << " " << user.second.first << " " << user.second.second << "\n";
 		string IP = user.second.first;
 		int PORT = user.second.second;
 		int new_socket, client_fd;
@@ -363,6 +330,7 @@ void *handleFileDownload(void *arg) {
 	f.filename = filename;
 	f.fileFullPath = fileDestinationPath + filename;
 	f.fileSHA = fileSHA;
+	f.groupID = groupID;
 	f.no_of_chunks_in_file = no_of_chunks_in_file;
 	f.status = "in_progress";
 	for(int i = 0; i < no_of_chunks_in_file; i++) {
@@ -375,23 +343,13 @@ void *handleFileDownload(void *arg) {
 
 	int fwp = open(filePath.c_str(), O_WRONLY | O_CREAT | O_LARGEFILE, S_IRUSR | S_IWUSR);
 
-	// for(auto chunk : chunksInfo){
-	// 	cout << chunk.first << ": ";
-	// 	for(auto user : chunk.second) {
-	// 		cout << user << " ";
-	// 	}
-	// 	cout << "\n";
-	// }
-
 	for(auto chunk : chunksInfo) {
 		int whichChunk = chunk.first;
-		// cout << whichChunk << " : ";
 		while(chunk.second.size() != 0  && mySharableFilesInfo[filename].chunks_bitmap[whichChunk] == 0) {
 			int index = rand() % chunk.second.size();
 			string user_id =  chunk.second[index];
 			string IP = userList[user_id].first;
 			int PORT = userList[user_id].second;
-			// cout << index << " " << user_id << " " << IP << " " << PORT << "\n";
 			
 
 			int new_socket, client_fd;
@@ -422,7 +380,6 @@ void *handleFileDownload(void *arg) {
 			}
 
 			string command = "send_file_chunks " + filename + " " + to_string(whichChunk) + " " + user_id;
-			// cout << command << "\n";
 			send(new_socket, command.c_str(), command.size(), 0);
 			bzero(buffer, sizeof(buffer));
 			
@@ -434,7 +391,6 @@ void *handleFileDownload(void *arg) {
 			
 
 			int sz = stoi(buffer);
-			// cout << "sz starting : " << sz << "\n";
 			command = "1";
 			send(new_socket, command.c_str(), command.size(), 0);
 
@@ -445,7 +401,6 @@ void *handleFileDownload(void *arg) {
 				if (nread <= 0) {
 					break;
 				}
-				// cout << "CHOTA CHUNK : " << nread << "\n";
 				nread = pwrite64(fwp, buffer,nread, whichChunk * BUFFER_SIZE + chota_chunk_no * CHOTA_CHUNK_SIZE);
 				chota_chunk_no++;
 				sz = sz - nread;
@@ -454,18 +409,13 @@ void *handleFileDownload(void *arg) {
 				send(new_socket, buffer, nread, 0);
 			}
 
-
-			// cout << sz << "\n";
-			// cout << "BUFFER : " << buffer << "\n";
 			if (sz > 0)
 			{
 				chunk.second.erase (chunk.second.begin() +  index);
 				continue;
 			}
-			// pwrite64(fwp, buffer, nread, (whichChunk) * BUFFER_SIZE);
 			mySharableFilesInfo[filename].chunks_bitmap[whichChunk] = 1;
 			mySharableFilesInfo[filename].no_of_downloaded_chunks++;
-			// cout << "chunk " << whichChunk << " downloaded from " << user_id << "\n"; 
 			break;
 		}
 	} 
@@ -481,8 +431,35 @@ void *handleFileDownload(void *arg) {
 
 }
 
+void fetchTrackerIpPort(int tracker_no) {
+	char buffer[100] = {0};
+	FILE *fd = fopen(TRACKER_FILE_NAME.c_str(), "r");
+	while(fscanf(fd, "%s", buffer) > 0) {
+		string s = buffer;
+		int tno = stoi(s);
+		bzero(buffer, sizeof(buffer));
+		if(fscanf(fd, "%s", buffer) < 0) {
+			cout << TRACKER_FILE_NAME << " doesn't have data in proper format.\n";
+			exit(EXIT_FAILURE);
+		}
+		string ip_port = buffer;
+		int found = ip_port.find_last_of(':');
+		string ip = ip_port.substr(0, found);
+		string port = ip_port.substr(found + 1 , ip_port.size() - found + 1);
 
-int connectMeToTracker() {
+		if(tno == tracker_no) {
+			TRACKER_IP = ip;
+			TRACKER_PORT = stoi(port);
+			return;
+		}
+		bzero(buffer, sizeof(buffer));
+	}
+	cout << "Tracker No. " <<  tracker_no << " not found in " << TRACKER_FILE_NAME << ".\n";
+	exit(EXIT_FAILURE);
+}
+
+int connectMeToTracker(int tracker_no) {
+	fetchTrackerIpPort(tracker_no);
 	int tracker_fd; // File Descriptor
 	int new_socket;
 	struct sockaddr_in address;
@@ -525,17 +502,20 @@ int connectMeToTracker() {
 
 int main(int argc, char** argv)
 {
-	if(argc < 4) {
+	if(argc < 3) {
 		cout << "Not Enough Arguments\n";
 		cout << "<IP> <PORT> <tracker_info.txt>\n";
 		exit(EXIT_FAILURE);
 	}
 
-	PEER_LISTEN_IP = argv[1];
-	PEER_LISTEN_PORT = stoi(argv[2]);
-	TRACKER_FILE_NAME = argv[3];
+	string ip_port = argv[1];
+	TRACKER_FILE_NAME = argv[2];
 
-	int TRACKER_SOCKET = connectMeToTracker();
+	int found = ip_port.find_last_of(':');
+	PEER_LISTEN_IP = ip_port.substr(0, found);
+	PEER_LISTEN_PORT = stoi(ip_port.substr(found + 1 , ip_port.size() - found + 1));
+
+	int TRACKER_SOCKET = connectMeToTracker(1);
 	// MSG("Connected to Tracker Successfully.");
 
 	pthread_t thread_listen_to_other_peers;
@@ -832,6 +812,7 @@ int main(int argc, char** argv)
 				f.filename = fname;
 				f.fileFullPath = fpath;
 				f.fileSHA = fsha;
+				f.groupID = group_id;
 				f.no_of_chunks_in_file = total_chunks;
 				f.status = "uploaded";
 				for(int i = 0; i < total_chunks; i++) {
@@ -868,7 +849,6 @@ int main(int argc, char** argv)
 			string command = "get_file_metadata " + group_id + " " + filename +  " " + myLoginInfo;
 			send(TRACKER_SOCKET, command.c_str(), command.size(), 0);
 			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
-			// cout << "BUFFER :: " <<  buffer << "\n";
 			string mes = buffer;
 			if(mes != "SUCCESS") {
 				ERROR(mes)
@@ -880,13 +860,11 @@ int main(int argc, char** argv)
 
 			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
 			string fileSHA = buffer;
-			// cout << fileSHA << "\n";
 			send(TRACKER_SOCKET, "1", command.size(), 0);
 
 			bzero(buffer, sizeof(buffer));
 			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
 			int no_of_chunks_in_file = stoi(buffer);
-			// cout << no_of_chunks_in_file << "\n";
 
 			send(TRACKER_SOCKET, "1", command.size(), 0);
 
@@ -901,29 +879,16 @@ int main(int argc, char** argv)
 				userList[token] = {token1, stoi(token2)};
 			}
 
-			// cout << userList.size() << "\n";
-			// for(auto user : userList) {
-			// 	cout << user.first << " " << user.second.first << " " << user.second.second << "\n";
-			// }
-
-			// cout << "METADATA RECEIVED FROM TRACKER\n";
-
-
-
 			downloadFileMetadataArgs *dfma = new downloadFileMetadataArgs();
 			dfma -> filename = filename;
 			dfma -> fileDestinationPath = fileDestinationPath;
 			dfma -> fileSHA = fileSHA;
 			dfma -> no_of_chunks_in_file = no_of_chunks_in_file;
 			dfma -> userList = userList;
+			dfma -> groupID = group_id;
 
 			pthread_t thread_to_handle_file_download;
 			pthread_create(&thread_to_handle_file_download, NULL, &handleFileDownload, (void *)dfma);
-
-
-			// recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
-
-			
 
 		}
 
@@ -934,12 +899,31 @@ int main(int argc, char** argv)
 				ERROR("Login first, then logout.");
 				continue;
 			}
+
+			string command = "logout " + myLoginInfo;
+
+			send(TRACKER_SOCKET, command.c_str(), command.size(), 0);
+
+			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+			myLoginInfo = "";
+			string mes = buffer;
+			PRINT(mes);
 			
 		}
 
 		// show_downloads
 		else if(inputVector[0] == "show_downloads") {
-			
+			for(auto file : mySharableFilesInfo) {
+				if(file.second.status == "in_progress") {
+					cout << "[D] " << file.second.groupID << " " << file.first << " " << (file.second.no_of_downloaded_chunks * 100)/file.second.no_of_chunks_in_file << "%\n"; 
+				}
+				else if(file.second.status == "downloaded") {
+					cout << "[C] " << file.second.groupID << " " << file.first << " " << (file.second.no_of_downloaded_chunks * 100)/file.second.no_of_chunks_in_file << "%\n";
+				}
+				else if(file.second.status == "failed") {
+					cout << "[F] " << file.second.groupID << " " << file.first << "\n";
+				}
+			}
 		}
 
 		// stop_share
@@ -948,53 +932,28 @@ int main(int argc, char** argv)
 				ERROR("2 arguments required.")
 				continue;
 			}
+
+			if(myLoginInfo == "") {
+				ERROR("Login first, then logout.");
+				continue;
+			}
+			string group_id = inputVector[1];
+			string filename = inputVector[2];
+
+
+			string command = "stop_share " + group_id + " " + filename + " " + myLoginInfo;
+
+			send(TRACKER_SOCKET, command.c_str(), command.size(), 0);
+
+			recv(TRACKER_SOCKET, buffer, sizeof(buffer), 0);
+			mySharableFilesInfo.erase(filename);
+			string mes = buffer;
+			PRINT(mes);
 		}
 
 		else {
 			PRINT("Invalid Input.");
 		}
-
-
-
-		/*--------------------------------------------------------------------*/
-
-		// cout << s << "\n";
-
-
-		// string IP = "127.0.0.1";
-
-		// int PORT ; 
-		// string mes;
-		// cin >> PORT >> mes;
-		
-		// int sock = socket(AF_INET, SOCK_STREAM, 0);
-		// int  valread, client_fd;
-
-		// struct sockaddr_in serv_addr;
-		// serv_addr.sin_family = AF_INET;
-		// serv_addr.sin_port = htons(PORT);
-
-		// // Convert IPv4 and IPv6 addresses from text to binary form
-		// if (inet_pton(AF_INET, IP.c_str() , &serv_addr.sin_addr)<= 0) {
-		// 	printf(
-		// 		"\nInvalid address/ Address not supported \n");
-		// 	return -1;
-		// }
-
-		// if ((client_fd
-		// 	= connect(sock, (struct sockaddr*)&serv_addr,
-		// 			sizeof(serv_addr)))
-		// 	< 0) {
-		// 	printf("\nConnection Failed \n");
-		// 	continue;
-		// }
-		// send(sock, mes.c_str(), mes.size(), 0);
-		// bzero(buffer, sizeof(buffer));
-		// recv(sock, buffer, 1024, 0);
-
-		// cout << buffer << "\n";
-		// close(sock);
-
 	}
 
 	return 0;

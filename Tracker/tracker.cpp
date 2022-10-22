@@ -45,6 +45,7 @@ void *connectToClients(void *arg)
 {
 	int new_socket = long(arg);
 	string message;
+	string loginInfo = "";
 
 	
 	message = "Connected to Tracker" + to_string(MY_TRACKER_NO) + " at " + TRACKER_LISTEN_IP + ":" + to_string(TRACKER_LISTEN_PORT); 
@@ -101,6 +102,7 @@ void *connectToClients(void *arg)
 				userLoggedIn[user_id] = {ip, port};
 				message = "user_logged_in";
 			}
+			loginInfo = user_id;
 			send(new_socket, message.c_str(), message.size(), 0);
 		}
 
@@ -382,16 +384,55 @@ void *connectToClients(void *arg)
 			}
 		}
 
+		// stop_share
+		else if(inputVector[0] == "stop_share") {
+			string group_id = inputVector[1];
+			string filename= inputVector[2];
+			string user_id = inputVector[3];
+			
+			if(groupInfo.find(group_id) == groupInfo.end()) { // 
+				message = "Group doesn't exists";
+			}
+
+			else if(groupMemberInfo[group_id].count(user_id) == 0) {
+				message = "You are not the part of group.";
+			}
+
+			else if(groupWiseSharableFiles[group_id].find(filename) == groupWiseSharableFiles[group_id].end()) {
+				message = "No file present in the group with given file name.";
+			}
+
+			else {
+				groupWiseSharableFiles[group_id][filename].usersHavingChunksOfFile.erase(user_id);
+				if(groupWiseSharableFiles[group_id][filename].usersHavingChunksOfFile.size() == 0) {
+					groupWiseSharableFiles[group_id].erase(filename);
+				}
+				message = "Stop Sharing Successful";
+			}
+			send(new_socket, message.c_str(), message.size(), 0);	
+		}
+
+		// logout
+		else if(inputVector[0] == "logout") {
+			string user_id = inputVector[1];
+			loginInfo = "";
+			userLoggedIn.erase(user_id);
+			message = "User Logged out.";
+			send(new_socket, message.c_str(), message.size(), 0);
+			
+		}
+
 
 		// Aise hi
 		else {
-			buffer[0] = '$';
-			send(new_socket, buffer, sizeof(buffer), 0);
+			message = "ERROR";
+			send(new_socket, message.c_str(), message.size(), 0);
 		}
 		
 	}
-
-	cout << "Connection Breaks\n";
+	userLoggedIn.erase(loginInfo);
+	cout << loginInfo << " ";
+	loginInfo = "";
 	close(new_socket);
 	pthread_exit(NULL);
 }
@@ -462,15 +503,50 @@ void *listenToClients(void *arg) {
 	shutdown(server_fd, SHUT_RDWR);
 }
 
+void fetchTrackerIpPort() {
+	char buffer[100] = {0};
+	FILE *fd = fopen(TRACKER_FILE_NAME.c_str(), "r");
+	while(fscanf(fd, "%s", buffer) > 0) {
+		string s = buffer;
+		int tno = stoi(s);
+		bzero(buffer, sizeof(buffer));
+		if(fscanf(fd, "%s", buffer) < 0) {
+			cout << TRACKER_FILE_NAME << " doesn't have data in proper format.\n";
+			exit(EXIT_FAILURE);
+		}
+		string ip_port = buffer;
+		int found = ip_port.find_last_of(':');
+		string ip = ip_port.substr(0, found);
+		string port = ip_port.substr(found + 1 , ip_port.size() - found + 1);
+
+		if(tno == MY_TRACKER_NO) {
+			TRACKER_LISTEN_IP = ip;
+			TRACKER_LISTEN_PORT = stoi(port);
+			return;
+		}
+		bzero(buffer, sizeof(buffer));
+	}
+	cout << "Tracker No. " <<  MY_TRACKER_NO << " not found in " << TRACKER_FILE_NAME << ".\n";
+	exit(EXIT_FAILURE);
+}
+
 int main(int argc, char** argv)
 {
-	// TRACKER_FILE_NAME = argv[1];
-	// MY_TRACKER_NO = stoi(argv[2]);
+
+	if(argc < 3) {
+		cout << "Not Enough Arguments\n";
+		cout << "<tracker_info.txt> <tracker_no>\n";
+		exit(EXIT_FAILURE);
+	}
+	TRACKER_FILE_NAME = argv[1];
+	MY_TRACKER_NO = stoi(argv[2]);
+
+	fetchTrackerIpPort();
 
 	/* HardCoding IP, PORT Of Tracker as of now*/
-	TRACKER_LISTEN_IP = "127.0.0.1";
-	TRACKER_LISTEN_PORT = 8080;
-	MY_TRACKER_NO = 1;
+	// TRACKER_LISTEN_IP = "127.0.0.1";
+	// TRACKER_LISTEN_PORT = 8080;
+	// MY_TRACKER_NO = 1;
 
 	// cout << PEER_LISTEN_IP << " : " << PEER_LISTEN_PORT << " : " << TRACKER_FILE_NAME << "\n";
 
